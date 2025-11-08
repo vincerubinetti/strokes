@@ -45,20 +45,32 @@ export class Vector {
     return this.x == other.x && this.y == other.y;
   }
 
+  length(): number;
+  length(length: number): Vector;
   length() {
-    return Math.hypot(this.x, this.y);
+    if (length) return this.normalize().scale(length);
+    else return Math.hypot(this.x, this.y);
   }
 
   lengthSquared() {
     return this.x ** 2 + this.y ** 2;
   }
 
-  angle() {
-    return Vector.atan2(this.y, this.x);
+  lengthBetween(other: Vector) {
+    return this.length() - other.length();
+  }
+
+  angle(): number;
+  angle(angle: number): Vector;
+  angle(angle?: number) {
+    if (angle) {
+      const length = this.length();
+      return new Vector(length * Vector.cos(angle), length * Vector.sin(angle));
+    } else return Vector.atan2(this.y, this.x);
   }
 
   angleBetween(other: Vector) {
-    return other.angle() - this.angle();
+    return this.angle() - other.angle();
   }
 
   add(other: Vector) {
@@ -93,8 +105,14 @@ export class Vector {
     return new Vector(this.x / value, this.y / value);
   }
 
-  hadamard(other: Vector) {
-    return new Vector(this.x * other.x, this.y * other.y);
+  normalize() {
+    return Vector.fromPolar({ length: 1, angle: this.angle() });
+  }
+
+  rotate(angle: number) {
+    const cos = Vector.cos(angle);
+    const sin = Vector.sin(angle);
+    return new Vector(this.x * cos - this.y * sin, this.x * sin + this.y * cos);
   }
 
   dot(other: Vector) {
@@ -105,19 +123,8 @@ export class Vector {
     return this.x * other.y - other.x * this.y;
   }
 
-  normalize() {
-    return Vector.fromPolar({ length: 1, angle: this.angle() });
-  }
-
-  rotateBy(angle: number) {
-    const cos = Vector.cos(angle);
-    const sin = Vector.sin(angle);
-    return new Vector(this.x * cos - this.y * sin, this.x * sin + this.y * cos);
-  }
-
-  rotateTo(angle: number) {
-    const length = this.length();
-    return new Vector(length * Vector.cos(angle), length * Vector.sin(angle));
+  hadamard(other: Vector) {
+    return new Vector(this.x * other.x, this.y * other.y);
   }
 
   mix(other: Vector, ratio = 0.5) {

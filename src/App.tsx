@@ -10,18 +10,17 @@ import gsap from "gsap";
 import * as freehand from "perfect-freehand";
 import { useHistory } from "./hooks";
 import { getSvgPathFromStroke, type Point } from "./freehand";
+import { atan, sin } from "./math";
 import { Vector } from "./vector";
 import "./App.css";
 
 /** params */
-const size = 2;
-const duration = 0.35;
-const steps = 10;
-const bulge = 0.01;
-const curve = 20;
+const size = 3;
+const duration = 0.5;
+const waveFreq = 0.01;
+const waveAmp = 10;
 const crinkleFreq = 0.1;
-const crinkleAmp = 5;
-const fps = 10;
+const crinkleAmp = 10;
 const background = "hsl(236, 47%, 35%)";
 const colors = [
   "hsl(331, 70%, 65%)",
@@ -31,8 +30,8 @@ const colors = [
   "hsl(258, 53%, 55%)",
 ] as const;
 
-/** gsap settings */
-gsap.ticker.fps(fps);
+/** stop motion effect */
+gsap.ticker.fps(10);
 
 /** paints on screen */
 const paints = new Map<symbol, Paint>();
@@ -45,32 +44,27 @@ const generate = (from: Vector, to: Vector) => {
   /** unique id */
   const id = Symbol();
 
-  /** start length */
-  const lengthStart = 0;
-  /** total change in length */
-  const lengthChange = to.subtract(from).length();
-  /** length delta */
-  const lengthStep = (lengthChange / steps) * random(0.5, 2, true);
-
-  /** total change in angle */
-  const angleChange = random(-curve, curve);
-  /** start angle */
-  const angleStart = from.subtract(to).angle();
-  /** angle delta */
-  const angleStep = angleChange / steps;
+  /** total length */
+  const length = to.subtract(from).length();
+  /** direction */
+  const direction = to.subtract(from).normalize();
+  /** random phase shift */
+  const shift = random(0, 1, true);
 
   /** generate path of points */
-  const points = range(steps)
-    .map((step) => {
-      const length = lengthStart + step * lengthStep;
-      const angle = angleStart + step * angleStep;
-      return to.add(Vector.fromPolar({ length, angle }));
-    })
-    .map((p) => ({ ...p, w: 0 }))
-    .reverse();
+  const points = range(0, length, size)
+    .map((dist) =>
+      from
+        .mix(to, dist / length)
+        .add(direction.rotate(90).scale(sin(dist * waveFreq + shift) * waveAmp))
+    )
+    .map((p) => ({ ...p, w: 0 }));
 
   /** random color */
   const color = sample(colors)!;
+
+  /** bulge width */
+  const bulge = atan(length / size / 10);
 
   /** point animations */
   const timelines = points.map((point, index) => {
@@ -88,7 +82,7 @@ const generate = (from: Vector, to: Vector) => {
         },
       })
       /** bulge width */
-      .to(point, { w: lengthChange * bulge, ease: "linear", duration })
+      .to(point, { w: bulge, ease: "linear", duration })
       /** un-bulge width */
       .to(point, { w: 0, ease: "linear", duration });
 
@@ -123,11 +117,9 @@ const draw = (points: Paint["points"]) => {
 
 /** get mouse position in svg coordinates */
 const useSvgMouse = (ref: RefObject<SVGSVGElement | null>) => {
-  const fallback = { x: 0, y: 0 };
   const mouse = useMouse(ref);
-  if (!ref.current) return fallback;
-  if (Number.isNaN(mouse.clientX) || Number.isNaN(mouse.clientY))
-    return fallback;
+  if (!ref.current) return;
+  if (Number.isNaN(mouse.clientX) || Number.isNaN(mouse.clientY)) return;
   const point = ref.current.createSVGPoint();
   point.x = mouse.clientX;
   point.y = mouse.clientY;
@@ -153,13 +145,14 @@ const App = () => {
 
   /** periodically generate new points */
   useInterval(() => {
-    /** earliest point */
-    const start = mouse.current.at(0);
-    /** latest point */
-    const end = mouse.current.at(-1);
-    if (!start || !end) return;
+    const earliest = mouse.current.at(0);
+    const latest = mouse.current.at(-1);
+    if (!earliest || !latest) return;
+    /** paint from/to */
+    const from = Vector.fromObject(earliest);
+    const to = Vector.fromObject(latest);
     /** generate new paint */
-    generate(Vector.fromObject(start), Vector.fromObject(end));
+    generate(from, to);
   }, 20);
 
   /** svg dimensions */
@@ -174,7 +167,6 @@ const App = () => {
     >
       <filter
         id={crinkleFilter}
-        color-interpolation-filters="linearRGB"
         filterUnits="objectBoundingBox"
         primitiveUnits="userSpaceOnUse"
       >
