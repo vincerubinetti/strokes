@@ -1,14 +1,15 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useId, useRef, type RefObject } from "react";
 import {
   useCounter,
   useElementSize,
   useInterval,
   useMouse,
 } from "@reactuses/core";
-import { mean, random, range, sample } from "lodash";
+import { random, range, sample } from "lodash";
 import gsap from "gsap";
 import * as freehand from "perfect-freehand";
 import { useHistory } from "./hooks";
+import { getSvgPathFromStroke, type Point } from "./freehand";
 import { Vector } from "./vector";
 import "./App.css";
 
@@ -18,35 +19,43 @@ const duration = 0.35;
 const steps = 10;
 const bulge = 0.01;
 const curve = 20;
+const crinkleFreq = 0.1;
+const crinkleAmp = 5;
+const fps = 10;
+const background = "hsl(236, 47%, 35%)";
+const colors = [
+  "hsl(331, 70%, 65%)",
+  "hsl(32, 80%, 58%)",
+  "hsl(145, 60%, 58%)",
+  "hsl(202, 67%, 60%)",
+  "hsl(258, 53%, 55%)",
+] as const;
 
-/** objects on screen */
-const objects = new Map<symbol, Object>();
+/** gsap settings */
+gsap.ticker.fps(fps);
 
-type Object = { points: { x: number; y: number; w: number }[]; color: string };
+/** paints on screen */
+const paints = new Map<symbol, Paint>();
 
-type Point = { x: number; y: number };
+/** paint data */
+type Paint = { points: { x: number; y: number; w: number }[]; color: string };
 
-/** generate object */
-const generate = (ap: Point, bp: Point) => {
+/** generate paint */
+const generate = (from: Vector, to: Vector) => {
   /** unique id */
   const id = Symbol();
-
-  /** from */
-  const a = new Vector(ap.x, ap.y);
-  /** to */
-  const b = new Vector(bp.x, bp.y);
 
   /** start length */
   const lengthStart = 0;
   /** total change in length */
-  const lengthChange = b.subtract(a).length();
+  const lengthChange = to.subtract(from).length();
   /** length delta */
   const lengthStep = (lengthChange / steps) * random(0.5, 2, true);
 
   /** total change in angle */
   const angleChange = random(-curve, curve);
   /** start angle */
-  const angleStart = a.subtract(b).angle();
+  const angleStart = from.subtract(to).angle();
   /** angle delta */
   const angleStep = angleChange / steps;
 
@@ -55,13 +64,13 @@ const generate = (ap: Point, bp: Point) => {
     .map((step) => {
       const length = lengthStart + step * lengthStep;
       const angle = angleStart + step * angleStep;
-      return b.add(Vector.fromPolar({ length, angle }));
+      return to.add(Vector.fromPolar({ length, angle }));
     })
     .map((p) => ({ ...p, w: 0 }))
     .reverse();
 
   /** random color */
-  const color = `var(--${sample(["a", "b", "c", "d", "e"])})`;
+  const color = sample(colors)!;
 
   /** point animations */
   const timelines = points.map((point, index) => {
@@ -74,8 +83,8 @@ const generate = (ap: Point, bp: Point) => {
           timelines[index] = true;
           /** if all animations are done */
           if (timelines.every(Boolean))
-            /** delete object */
-            objects.delete(id);
+            /** delete paint */
+            paints.delete(id);
         },
       })
       /** bulge width */
@@ -87,18 +96,12 @@ const generate = (ap: Point, bp: Point) => {
     return false;
   });
 
-  /** create object */
-  objects.set(id, { points, color });
+  /** create paint */
+  paints.set(id, { points, color });
 };
 
-/** https://github.com/steveruizok/perfect-freehand?tab=readme-ov-file#rendering */
-const avg = (a: [number, number], b: [number, number]) => [
-  mean([a[0], b[0]]),
-  mean([a[1], b[1]]),
-];
-
 /** draw one frame of animation */
-const draw = (points: Object["points"]) => {
+const draw = (points: Paint["points"]) => {
   /** convert points to stroke */
   const stroke = freehand.getStroke(
     points.map(({ x, y, w }) => [x, y, w]),
@@ -112,23 +115,10 @@ const draw = (points: Object["points"]) => {
       // start: { cap: false },
       // end: { cap: false },
     }
-  ) as [number, number][];
+  ) as Point[];
 
-  /** convert stroke to svg path */
-  /** https://github.com/steveruizok/perfect-freehand?tab=readme-ov-file#rendering */
-  const path = [
-    "M",
-    ...stroke[0],
-    "Q",
-    ...stroke[1],
-    ...avg(stroke[1], stroke[2]),
-    "T",
-    ...range(2, stroke.length - 1)
-      .map((i) => avg(stroke[i], stroke[i + 1]))
-      .flat(),
-  ].join(" ");
-
-  return path;
+  /** convert stroke to svg path  */
+  return getSvgPathFromStroke(stroke);
 };
 
 /** get mouse position in svg coordinates */
@@ -145,9 +135,12 @@ const useSvgMouse = (ref: RefObject<SVGSVGElement | null>) => {
 };
 
 const App = () => {
+  const crinkleFilter = useId();
+
   const ref = useRef<SVGSVGElement>(null);
 
-  const [, , inc] = useCounter();
+  /** tick counter */
+  const [tick, , inc] = useCounter();
 
   /** re-render on gsap tick */
   useEffect(() => {
@@ -165,22 +158,51 @@ const App = () => {
     /** latest point */
     const end = mouse.current.at(-1);
     if (!start || !end) return;
-    /** generate new object */
-    generate(start, end);
+    /** generate new paint */
+    generate(Vector.fromObject(start), Vector.fromObject(end));
   }, 20);
 
-  /** client dimensions of svg */
+  /** svg dimensions */
   const [width, height] = useElementSize(ref);
 
   return (
     <svg
       ref={ref}
       viewBox={[0, 0, width, height].join(" ")}
-      filter="url(#filter)"
+      filter={`url(#${crinkleFilter})`}
+      style={{ overflow: "visible" }}
     >
-      <rect x={0} y={0} width={width} height={height} fill="var(--f)" />
+      <filter
+        id={crinkleFilter}
+        color-interpolation-filters="linearRGB"
+        filterUnits="objectBoundingBox"
+        primitiveUnits="userSpaceOnUse"
+      >
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency={crinkleFreq}
+          numOctaves="1"
+          stitchTiles="stitch"
+          seed={tick}
+          result="turbulence"
+        />
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="turbulence"
+          scale={crinkleAmp}
+          result="displacementMap"
+        />
+      </filter>
 
-      {Array.from(objects.values()).map(({ points, color }, index) => (
+      <rect
+        x={-crinkleAmp}
+        y={-crinkleAmp}
+        width={width + 2 * crinkleAmp}
+        height={height + 2 * crinkleAmp}
+        fill={background}
+      />
+
+      {Array.from(paints.values()).map(({ points, color }, index) => (
         <path key={index} d={draw(points)} fill={color} />
       ))}
     </svg>
