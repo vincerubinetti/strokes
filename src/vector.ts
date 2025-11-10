@@ -11,6 +11,10 @@ export class Vector {
     this.y = y;
   }
 
+  clone() {
+    return new Vector(this.x, this.y);
+  }
+
   static fromObject(object: { x: number; y: number }) {
     return new Vector(object.x, object.y);
   }
@@ -37,7 +41,7 @@ export class Vector {
 
   toString(precision = 3, separator = ",") {
     return [this.x, this.y]
-      .map((value) => value.toFixed(precision).replace(/\.0+$/, ""))
+      .map((value) => value.toFixed(precision).replace(/\.*0+$/, ""))
       .join(separator);
   }
 
@@ -47,30 +51,28 @@ export class Vector {
 
   length(): number;
   length(length: number): Vector;
-  length() {
-    if (length) return this.normalize().scale(length);
-    else return Math.hypot(this.x, this.y);
+  length(length?: number) {
+    if (length === undefined) return Math.hypot(this.x, this.y);
+    else return this.normalize().scale(length);
   }
 
   lengthSquared() {
     return this.x ** 2 + this.y ** 2;
   }
 
-  distance(other: Vector) {
+  distanceTo(other: Vector) {
     return other.subtract(this).length();
   }
 
   angle(): number;
   angle(angle: number): Vector;
   angle(angle?: number) {
-    if (angle) {
-      const length = this.length();
-      return new Vector(length * Vector.cos(angle), length * Vector.sin(angle));
-    } else return Vector.atan2(this.y, this.x);
+    if (angle === undefined) return Vector.atan2(this.y, this.x);
+    else return Vector.fromPolar({ length: this.length(), angle });
   }
 
-  angleBetween(other: Vector) {
-    return this.angle() - other.angle();
+  angleTo(other: Vector) {
+    return other.angle() - this.angle();
   }
 
   add(other: Vector) {
@@ -138,17 +140,6 @@ export class Vector {
     return new Vector(-1 + 2 * Math.random(), -1 + 2 * Math.random());
   }
 
-  static randomAngle() {
-    let angle = Math.random();
-    if (Vector.angleUnits === "degrees") angle *= 360;
-    else angle *= 2 * Math.PI;
-    return Vector.fromPolar({ length: 1, angle });
-  }
-
-  static clamp(value: number, min: number, max: number) {
-    return Math.max(min, Math.min(max, value));
-  }
-
   clamp(min: Vector, max: Vector) {
     return new Vector(
       Vector.clamp(this.x, min.x, max.x),
@@ -188,5 +179,9 @@ export class Vector {
     let angle = Math.atan2(y, x);
     if (Vector.angleUnits === "degrees") angle *= Vector.toDeg;
     return angle;
+  }
+
+  static clamp(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, value));
   }
 }

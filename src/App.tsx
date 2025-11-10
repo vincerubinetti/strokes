@@ -1,24 +1,23 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useElementSize } from "@reactuses/core";
-import { now, random, range } from "lodash";
-import * as freehand from "perfect-freehand";
+import { now, random } from "lodash";
 import gsap from "gsap";
-import { findAfter, findBefore } from "./array";
+import * as freehand from "perfect-freehand";
 import { getSvgPathFromStroke, type Point } from "./freehand";
-import { useHistory, useSvgMouse } from "./hooks";
 import { sin } from "./math";
 import { Vector } from "./vector";
 import "./App.css";
 
 /** params */
-const size = 2;
-const grow = 0.1;
-const stagger = 0.5;
-const fade = 1;
-const interval = 20;
-const waveFreq = 0.01;
-const waveAmp = 10;
-const wisp = 10;
+const size = 1;
+const grow = 0.25;
+const stagger = 0.1;
+const fade = 2;
+const tail = 50;
+const interval = 50;
+const waveFreq = 0.2;
+const waveAmp = 20;
+const wisp = 20;
 const background = "hsl(230, 50%, 20%)";
 const colors = [
   "hsl(330, 70%, 60%)",
@@ -38,46 +37,38 @@ const paints = new Map<symbol, Paint>();
 type Paint = { points: { x: number; y: number; w: number }[]; color: string };
 
 /** generate paint */
-const generate = (from: Vector, to: Vector) => {
+const generate = (positions: Vector[]) => {
   /** unique id */
   const id = Symbol();
 
-  /** total length */
-  const length = to.subtract(from).length();
-  /** direction */
-  const direction = to.subtract(from).normalize();
-  /** random phase shift */
-  const shift = random(0, 1, true);
+  /** distance traveled */
+  let dist = 0;
 
   /** generate path of points */
-  const points = range(0, length, size)
-    .map((dist) =>
-      from
-        .mix(to, dist / length)
-        .add(direction.rotate(90).scale(sin(dist * waveFreq + shift) * waveAmp))
-    )
-    .map((p) => ({ ...p, w: 0 }));
+  const points = positions
+    .map((point, index, array) => {
+      const next = array[index + 1];
+      if (!next) return;
+      if (next.equals(point)) return;
+      const step = next.subtract(point);
+      if (!step.length()) return;
+      dist += waveFreq;
+      /** wiggle */
+      return point.add(
+        step
+          .normalize()
+          .rotate(90)
+          .scale(waveAmp * sin(dist))
+      );
+    })
+    .filter((point) => point !== undefined)
+    .map((point) => ({ ...point, w: 0 }));
+
+  /** wisp offsets, smoothed */
+  const offsets = points.map(() => random(-wisp, wisp));
 
   /** cycle color */
   const color = colors[colorIndex++ % colors.length];
-
-  /** wisp offsets */
-  const offsets = points
-    .map((_, index) =>
-      /** only randomly offset ever nth point */
-      index % wisp === 0
-        ? new Vector(random(-wisp, wisp), random(-wisp, wisp))
-        : null
-    )
-    .map((offset, index, array) => {
-      if (offset !== null) return offset;
-      /** interpolate missing values in between generated randoms */
-      const before = findBefore(array, index);
-      const after = findAfter(array, index);
-      if (!before || !after) return new Vector(0, 0);
-      const mix = (index - before.index) / (after.index - before.index);
-      return before.item.mix(after.item, mix);
-    });
 
   /** point animations */
   const timelines = points.map((point, index) => {
@@ -99,8 +90,8 @@ const generate = (from: Vector, to: Vector) => {
       /** fade out */
       .to(point, {
         w: 0,
-        x: point.x + (offsets[index]?.x ?? 0),
-        y: point.y + (offsets[index]?.y ?? 0),
+        x: point.x + offsets[index],
+        y: point.y + offsets[index],
         ease: "linear",
         duration: fade,
       });
@@ -122,8 +113,8 @@ const draw = (points: Paint["points"]) => {
     {
       size,
       thinning: 1,
-      smoothing: 1,
-      streamline: 1,
+      smoothing: 0.5,
+      streamline: 0.5,
       simulatePressure: false,
     }
   ) as Point[];
@@ -133,8 +124,6 @@ const draw = (points: Paint["points"]) => {
 };
 
 const App = () => {
-  const filter = useId();
-
   const ref = useRef<SVGSVGElement>(null);
 
   /** tick counter */
@@ -147,23 +136,14 @@ const App = () => {
     return () => gsap.ticker.remove(inc);
   }, []);
 
-  /** track mouse position history */
-  const mouse = useHistory(useSvgMouse(ref), 20);
+  trackTrail();
 
   /** last generate timestamp */
   const lastGenerate = useRef(0);
   if (now() - lastGenerate.current > interval) {
-    /** mouse positions */
-    const earliest = mouse.current.at(0);
-    const latest = mouse.current.at(-1);
-    if (earliest && latest) {
-      /** paint from/to */
-      const from = Vector.fromObject(earliest);
-      const to = Vector.fromObject(latest);
-      /** generate new paint */
-      generate(from, to);
-      lastGenerate.current = now();
-    }
+    /** generate new paint */
+    generate(trail);
+    lastGenerate.current = now();
   }
 
   /** svg dimensions */
@@ -171,17 +151,13 @@ const App = () => {
 
   return (
     <svg
-      ref={ref}
+      ref={(el) => {
+        ref.current = el;
+        svg = el;
+      }}
       viewBox={[-width / 2, -height / 2, width, height].join(" ")}
-      filter={`url(#${filter})`}
       style={{ overflow: "visible" }}
     >
-      <filter
-        id={filter}
-        filterUnits="objectBoundingBox"
-        primitiveUnits="userSpaceOnUse"
-      ></filter>
-
       <rect
         x={-width / 2 - 100}
         y={-height / 2 - 100}
@@ -198,3 +174,30 @@ const App = () => {
 };
 
 export default App;
+
+/** mouse position */
+let mouse: Vector | null = null;
+
+/** mouse trail */
+const trail: Vector[] = [];
+
+/** reference svg */
+let svg: SVGSVGElement | null = null;
+
+/** track mouse */
+window.addEventListener("mousemove", (event) => {
+  if (!svg) return;
+  const svgPoint = svg.createSVGPoint();
+  svgPoint.x = event.clientX;
+  svgPoint.y = event.clientY;
+  mouse = Vector.fromObject(
+    svgPoint.matrixTransform(svg.getScreenCTM()?.inverse())
+  );
+});
+
+/** track trail */
+const trackTrail = () => {
+  if (!mouse) return;
+  trail.push(mouse.clone());
+  if (trail.length > tail) trail.shift();
+};
