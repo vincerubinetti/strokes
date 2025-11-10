@@ -1,21 +1,24 @@
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
-import { random, range } from "lodash";
-import { useElementSize, useInterval, useMouse } from "@reactuses/core";
+import { useEffect, useId, useRef, useState } from "react";
+import { useElementSize } from "@reactuses/core";
+import { now, random, range } from "lodash";
 import * as freehand from "perfect-freehand";
-import { getSvgPathFromStroke, type Point } from "./freehand";
 import gsap from "gsap";
 import { findAfter, findBefore } from "./array";
-import { useHistory } from "./hooks";
+import { getSvgPathFromStroke, type Point } from "./freehand";
+import { useHistory, useSvgMouse } from "./hooks";
 import { sin } from "./math";
 import { Vector } from "./vector";
 import "./App.css";
 
 /** params */
-const size = 3;
-const duration = 0.5;
-const waveFreq = 0.005;
-const waveAmp = 20;
-const wisp = 6;
+const size = 2;
+const grow = 0.1;
+const stagger = 0.5;
+const fade = 1;
+const interval = 20;
+const waveFreq = 0.01;
+const waveAmp = 10;
+const wisp = 10;
 const background = "hsl(230, 50%, 20%)";
 const colors = [
   "hsl(330, 70%, 60%)",
@@ -58,11 +61,11 @@ const generate = (from: Vector, to: Vector) => {
   /** cycle color */
   const color = colors[colorIndex++ % colors.length];
 
-  /** point offsets */
+  /** wisp offsets */
   const offsets = points
     .map((_, index) =>
       /** only randomly offset ever nth point */
-      index % size === 0
+      index % wisp === 0
         ? new Vector(random(-wisp, wisp), random(-wisp, wisp))
         : null
     )
@@ -81,7 +84,7 @@ const generate = (from: Vector, to: Vector) => {
     gsap
       .timeline({
         /** stagger animations by index */
-        delay: (index / points.length) * duration,
+        delay: (index / points.length) * stagger,
         onComplete: () => {
           /** mark this animation as done */
           timelines[index] = true;
@@ -91,15 +94,15 @@ const generate = (from: Vector, to: Vector) => {
             paints.delete(id);
         },
       })
-      /** bulge */
-      .to(point, { w: 1, ease: "power1.inOut", duration })
+      /** grow */
+      .to(point, { w: 1, ease: "linear", duration: grow })
       /** fade out */
       .to(point, {
         w: 0,
         x: point.x + (offsets[index]?.x ?? 0),
         y: point.y + (offsets[index]?.y ?? 0),
-        ease: "power1.inOut",
-        duration: 2 * duration,
+        ease: "linear",
+        duration: fade,
       });
 
     /** not done yet */
@@ -119,25 +122,14 @@ const draw = (points: Paint["points"]) => {
     {
       size,
       thinning: 1,
-      smoothing: 0,
-      streamline: 0,
+      smoothing: 1,
+      streamline: 1,
       simulatePressure: false,
     }
   ) as Point[];
 
   /** convert stroke to svg path  */
   return getSvgPathFromStroke(stroke);
-};
-
-/** get mouse position in svg coordinates */
-const useSvgMouse = (ref: RefObject<SVGSVGElement | null>) => {
-  const mouse = useMouse(ref);
-  if (!ref.current) return;
-  if (Number.isNaN(mouse.clientX) || Number.isNaN(mouse.clientY)) return;
-  const point = ref.current.createSVGPoint();
-  point.x = mouse.clientX;
-  point.y = mouse.clientY;
-  return point.matrixTransform(ref.current.getScreenCTM()?.inverse());
 };
 
 const App = () => {
@@ -158,17 +150,21 @@ const App = () => {
   /** track mouse position history */
   const mouse = useHistory(useSvgMouse(ref), 20);
 
-  /** periodically generate new points */
-  useInterval(() => {
+  /** last generate timestamp */
+  const lastGenerate = useRef(0);
+  if (now() - lastGenerate.current > interval) {
+    /** mouse positions */
     const earliest = mouse.current.at(0);
     const latest = mouse.current.at(-1);
-    if (!earliest || !latest) return;
-    /** paint from/to */
-    const from = Vector.fromObject(earliest);
-    const to = Vector.fromObject(latest);
-    /** generate new paint */
-    generate(from, to);
-  }, 20);
+    if (earliest && latest) {
+      /** paint from/to */
+      const from = Vector.fromObject(earliest);
+      const to = Vector.fromObject(latest);
+      /** generate new paint */
+      generate(from, to);
+      lastGenerate.current = now();
+    }
+  }
 
   /** svg dimensions */
   const [width, height] = useElementSize(ref);

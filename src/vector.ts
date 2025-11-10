@@ -56,8 +56,8 @@ export class Vector {
     return this.x ** 2 + this.y ** 2;
   }
 
-  lengthBetween(other: Vector) {
-    return this.length() - other.length();
+  distance(other: Vector) {
+    return other.subtract(this).length();
   }
 
   angle(): number;
