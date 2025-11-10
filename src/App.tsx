@@ -1,40 +1,32 @@
-import { useEffect, useId, useRef, type RefObject } from "react";
-import {
-  useCounter,
-  useElementSize,
-  useInterval,
-  useMouse,
-} from "@reactuses/core";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { random, range } from "lodash";
-import gsap from "gsap";
+import { useElementSize, useInterval, useMouse } from "@reactuses/core";
 import * as freehand from "perfect-freehand";
-import { useHistory } from "./hooks";
 import { getSvgPathFromStroke, type Point } from "./freehand";
-import { atan, sin } from "./math";
+import gsap from "gsap";
+import { findAfter, findBefore } from "./array";
+import { useHistory } from "./hooks";
+import { sin } from "./math";
 import { Vector } from "./vector";
 import "./App.css";
 
 /** params */
 const size = 3;
 const duration = 0.5;
-const waveFreq = 0.01;
-const waveAmp = 10;
-const crinkleFreq = 0.1;
-const crinkleAmp = 10;
-const background = "hsl(236, 47%, 35%)";
+const waveFreq = 0.005;
+const waveAmp = 20;
+const wisp = 6;
+const background = "hsl(230, 50%, 20%)";
 const colors = [
-  "hsl(331, 70%, 65%)",
-  "hsl(32, 80%, 58%)",
-  "hsl(145, 60%, 58%)",
-  "hsl(202, 67%, 60%)",
-  "hsl(258, 53%, 55%)",
+  "hsl(330, 70%, 60%)",
+  "hsl(30, 70%, 60%)",
+  "hsl(140, 70%, 60%)",
+  "hsl(200, 70%, 60%)",
+  "hsl(260, 70%, 60%)",
 ] as const;
 
 /** current color */
 let colorIndex = 0;
-
-/** stop motion effect */
-gsap.ticker.fps(10);
 
 /** paints on screen */
 const paints = new Map<symbol, Paint>();
@@ -66,8 +58,23 @@ const generate = (from: Vector, to: Vector) => {
   /** cycle color */
   const color = colors[colorIndex++ % colors.length];
 
-  /** bulge width */
-  const bulge = atan(length / size / 10);
+  /** point offsets */
+  const offsets = points
+    .map((_, index) =>
+      /** only randomly offset ever nth point */
+      index % size === 0
+        ? new Vector(random(-wisp, wisp), random(-wisp, wisp))
+        : null
+    )
+    .map((offset, index, array) => {
+      if (offset !== null) return offset;
+      /** interpolate missing values in between generated randoms */
+      const before = findBefore(array, index);
+      const after = findAfter(array, index);
+      if (!before || !after) return new Vector(0, 0);
+      const mix = (index - before.index) / (after.index - before.index);
+      return before.item.mix(after.item, mix);
+    });
 
   /** point animations */
   const timelines = points.map((point, index) => {
@@ -84,10 +91,16 @@ const generate = (from: Vector, to: Vector) => {
             paints.delete(id);
         },
       })
-      /** bulge width */
-      .to(point, { w: bulge, ease: "linear", duration })
-      /** un-bulge width */
-      .to(point, { w: 0, ease: "linear", duration });
+      /** bulge */
+      .to(point, { w: 1, ease: "power1.inOut", duration })
+      /** fade out */
+      .to(point, {
+        w: 0,
+        x: point.x + (offsets[index]?.x ?? 0),
+        y: point.y + (offsets[index]?.y ?? 0),
+        ease: "power1.inOut",
+        duration: 2 * duration,
+      });
 
     /** not done yet */
     return false;
@@ -109,8 +122,6 @@ const draw = (points: Paint["points"]) => {
       smoothing: 0,
       streamline: 0,
       simulatePressure: false,
-      // start: { cap: false },
-      // end: { cap: false },
     }
   ) as Point[];
 
@@ -130,18 +141,19 @@ const useSvgMouse = (ref: RefObject<SVGSVGElement | null>) => {
 };
 
 const App = () => {
-  const crinkleFilter = useId();
+  const filter = useId();
 
   const ref = useRef<SVGSVGElement>(null);
 
   /** tick counter */
-  const [tick, , inc] = useCounter();
+  const [, setTick] = useState(0);
 
   /** re-render on gsap tick */
   useEffect(() => {
+    const inc = () => setTick((tick) => tick + 1);
     gsap.ticker.add(inc);
     return () => gsap.ticker.remove(inc);
-  }, [inc]);
+  }, []);
 
   /** track mouse position history */
   const mouse = useHistory(useSvgMouse(ref), 20);
@@ -156,7 +168,7 @@ const App = () => {
     const to = Vector.fromObject(latest);
     /** generate new paint */
     generate(from, to);
-  }, 100);
+  }, 20);
 
   /** svg dimensions */
   const [width, height] = useElementSize(ref);
@@ -164,36 +176,21 @@ const App = () => {
   return (
     <svg
       ref={ref}
-      viewBox={[0, 0, width, height].join(" ")}
-      filter={`url(#${crinkleFilter})`}
+      viewBox={[-width / 2, -height / 2, width, height].join(" ")}
+      filter={`url(#${filter})`}
       style={{ overflow: "visible" }}
     >
       <filter
-        id={crinkleFilter}
+        id={filter}
         filterUnits="objectBoundingBox"
         primitiveUnits="userSpaceOnUse"
-      >
-        <feTurbulence
-          type="fractalNoise"
-          baseFrequency={crinkleFreq}
-          numOctaves="1"
-          stitchTiles="stitch"
-          seed={tick}
-          result="turbulence"
-        />
-        <feDisplacementMap
-          in="SourceGraphic"
-          in2="turbulence"
-          scale={crinkleAmp}
-          result="displacementMap"
-        />
-      </filter>
+      ></filter>
 
       <rect
-        x={-crinkleAmp}
-        y={-crinkleAmp}
-        width={width + 2 * crinkleAmp}
-        height={height + 2 * crinkleAmp}
+        x={-width / 2 - 100}
+        y={-height / 2 - 100}
+        width={width + 2 * 200}
+        height={height + 2 * 200}
         fill={background}
       />
 

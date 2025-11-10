@@ -134,6 +134,17 @@ export class Vector {
     );
   }
 
+  static random() {
+    return new Vector(-1 + 2 * Math.random(), -1 + 2 * Math.random());
+  }
+
+  static randomAngle() {
+    let angle = Math.random();
+    if (Vector.angleUnits === "degrees") angle *= 360;
+    else angle *= 2 * Math.PI;
+    return Vector.fromPolar({ length: 1, angle });
+  }
+
   static clamp(value: number, min: number, max: number) {
     return Math.max(min, Math.min(max, value));
   }
