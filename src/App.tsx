@@ -5,7 +5,7 @@ import {
   useInterval,
   useMouse,
 } from "@reactuses/core";
-import { random, range, sample } from "lodash";
+import { random, range } from "lodash";
 import gsap from "gsap";
 import * as freehand from "perfect-freehand";
 import { useHistory } from "./hooks";
@@ -29,6 +29,9 @@ const colors = [
   "hsl(202, 67%, 60%)",
   "hsl(258, 53%, 55%)",
 ] as const;
+
+/** current color */
+let colorIndex = 0;
 
 /** stop motion effect */
 gsap.ticker.fps(10);
@@ -60,8 +63,8 @@ const generate = (from: Vector, to: Vector) => {
     )
     .map((p) => ({ ...p, w: 0 }));
 
-  /** random color */
-  const color = sample(colors)!;
+  /** cycle color */
+  const color = colors[colorIndex++ % colors.length];
 
   /** bulge width */
   const bulge = atan(length / size / 10);
@@ -153,7 +156,7 @@ const App = () => {
     const to = Vector.fromObject(latest);
     /** generate new paint */
     generate(from, to);
-  }, 20);
+  }, 100);
 
   /** svg dimensions */
   const [width, height] = useElementSize(ref);
